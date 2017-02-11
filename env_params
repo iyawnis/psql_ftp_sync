@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+export DB_PORT=xxx
+export DB_HOST=xxx
+export DB_NAME=xxx
+export DB_USER=xxx
+export DB_PASSWD=xxx
+export FTP_HOST=xxx
+export FTP_USER=xxx
+export FTP_PASSWD=xxx
