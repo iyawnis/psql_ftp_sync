@@ -4,6 +4,7 @@ import psycopg2
 import os
 from ftplib import FTP
 from traceback import print_exc
+from collections import namedtuple
 
 DB_HOST=os.environ['DB_HOST']
 DB_NAME=os.environ['DB_NAME']
@@ -13,8 +14,16 @@ FTP_HOST=os.environ['FTP_HOST']
 FTP_USER=os.environ['FTP_USER']
 FTP_PASSWD=os.environ['FTP_PASSWD']
 
+FileToStore = namedtuple('FileToStore', ['title', 'description', 'stream',])
+conn_config = {
+    'host': DB_HOST,
+    'dbname': DB_NAME,
+    'user': DB_USER,
+    'password': DB_PASSWD
+}
+
 def execute_sql(sql, params):
-    with psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWD) as conn:
+    with psycopg2.connect(**conn_config) as conn:
          with conn.cursor() as cursor:
             cursor.execute(sql, (params,))
             return cursor.fetchall()
@@ -32,6 +41,7 @@ def get_uploaded_file_names():
     Retrieve the available uploaded filenames
     """
     files = []
+    return ['1500001.pdf',]
     with FTP(host=FTP_HOST, user=FTP_USER, passwd=FTP_PASSWD) as ftp:
         files = ftp.nlst()
     return files
@@ -68,9 +78,41 @@ def find_all_files_not_uploaded(matches):
     ls_numbers = tuple([filename_to_ls_num(filename) for filename in matches])
     SQL = """SELECT docass.docass_source_id from docass where docass.docass_source_id IN %s AND docass.docass_source_type='LS'"""
     all_existing = set(execute_sql(SQL, ls_numbers))
-    return set(ls_numbers) - set(all_existing)
+    stored_diff = set(ls_numbers) - set(all_existing)
+    files_to_store = []
+    for ls_number in stored_diff:
+        filename = filter(lambda ftp_name: filename_to_ls_num(ftp_name) == ls_number, matches)
+        files_to_store += filename
+    return files_to_store
+
+def load_ftp_file(filename):
+    """
+    Given a filename, fetch the file from FTP, and return a stream object
+    """
+    file_obj = None
+    with open(filename, 'rb') as infile:
+        file_obj = infile.read()
+    ls_number = filename_to_ls_num(filename)
+    return (ls_number, 'Uploaded file', psycopg2.Binary(file_obj),)
+
+
+def insert_missing_file_entries(filenames_to_store):
+    """
+    Given a list of missing filenames, fetch the files and store them in the file table
+    """
+    files_to_store = [load_ftp_file(filename) for filename in filenames_to_store]
+    sql = """INSERT INTO file(file_title, file_descrip, file_stream) VALUES {} RETURNING file_id;"""
+    with psycopg2.connect(**conn_config) as conn:
+        with conn.cursor() as cursor:
+            records_list_template = ','.join(['%s'] * len(files_to_store))
+            insert_query = sql.format(records_list_template)
+            print(insert_query)
+            print(files_to_store)
+            cursor.execute(insert_query, files_to_store)
+            return cursor.fetchall()
 
 
 if __name__ == "__main__":
     matches = find_ls_ftp_matches()
-    print(find_all_files_not_uploaded(matches))
+    files_to_store = find_all_files_not_uploaded(matches)
+    print(insert_missing_file_entries(files_to_store))
