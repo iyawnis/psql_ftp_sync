@@ -6,20 +6,17 @@ from ftplib import FTP
 from traceback import print_exc
 from collections import namedtuple
 
-DB_HOST=os.environ['DB_HOST']
-DB_NAME=os.environ['DB_NAME']
-DB_USER=os.environ['DB_USER']
-DB_PASSWD=os.environ['DB_PASSWD']
 FTP_HOST=os.environ['FTP_HOST']
 FTP_USER=os.environ['FTP_USER']
 FTP_PASSWD=os.environ['FTP_PASSWD']
 
 FileToStore = namedtuple('FileToStore', ['title', 'description', 'stream',])
 conn_config = {
-    'host': DB_HOST,
-    'dbname': DB_NAME,
-    'user': DB_USER,
-    'password': DB_PASSWD
+    'host': os.environ['DB_HOST'],
+    'dbname': os.environ['DB_NAME'],
+    'user': os.environ['DB_USER'],
+    'password': os.environ['DB_PASSWD'],
+    'port': os.environ['DB_PORT']
 }
 
 def execute_sql(sql, params):
@@ -41,7 +38,6 @@ def get_uploaded_file_names():
     Retrieve the available uploaded filenames
     """
     files = []
-    return ['1500001.pdf',]
     with FTP(host=FTP_HOST, user=FTP_USER, passwd=FTP_PASSWD) as ftp:
         files = ftp.nlst()
     return files
@@ -93,7 +89,7 @@ def load_ftp_file(filename):
     with open(filename, 'rb') as infile:
         file_obj = infile.read()
     ls_number = filename_to_ls_num(filename)
-    return (ls_number, 'Uploaded file', psycopg2.Binary(file_obj),)
+    return FileToStore(title=ls_number, description='Uploaded file', stream=psycopg2.Binary(file_obj))
 
 
 def insert_missing_file_entries(filenames_to_store):
@@ -106,8 +102,6 @@ def insert_missing_file_entries(filenames_to_store):
         with conn.cursor() as cursor:
             records_list_template = ','.join(['%s'] * len(files_to_store))
             insert_query = sql.format(records_list_template)
-            print(insert_query)
-            print(files_to_store)
             cursor.execute(insert_query, files_to_store)
             return cursor.fetchall()
 
