@@ -2,6 +2,7 @@
 
 import psycopg2
 import os
+import time
 from io import BytesIO
 from ftplib import FTP
 from traceback import print_exc
@@ -29,11 +30,17 @@ conn_config = {
     'port': os.environ['DB_PORT']
 }
 
+
+def print_message(msg):
+    print("[{}] {}".format(time.strftime('%c'), msg))
+
+
 def execute_sql(sql, params):
     with psycopg2.connect(**conn_config) as conn:
          with conn.cursor() as cursor:
             cursor.execute(sql, (params,))
             return cursor.fetchall()
+
 
 def get_ls_numbers():
     """
@@ -41,6 +48,14 @@ def get_ls_numbers():
     """
     SQL = """SELECT DISTINCT(ls.ls_number) FROM ls"""
     return set([row[0] for row in execute_sql(SQL, None)])
+
+
+def get_ls_ids_from_ls_number(ls_numbers):
+    """
+    Return the ls_id and ls_number for the given ls_numbers
+    """
+    SQL = """ SELECT ls.ls_id, ls.ls_number from ls where ls_number in %s"""
+    return execute_sql(SQL, ls_numbers)
 
 
 def get_uploaded_file_names():
@@ -52,6 +67,7 @@ def get_uploaded_file_names():
         files = ftp.nlst(FTP_DIR)
     return files
 
+
 def filename_to_ls_num(ftp_filename):
     """
     Change a filename, to an ls_number
@@ -61,8 +77,9 @@ def filename_to_ls_num(ftp_filename):
     except:
         file_name = ftp_filename
         print_exc()
-        print('Filename without extension:', file_name)
+        print_message('Filename without extension: {}'.format(file_name))
     return file_name
+
 
 def find_ls_ftp_matches():
     """
@@ -70,32 +87,35 @@ def find_ls_ftp_matches():
     """
     ls_numbers = get_ls_numbers()
     ftp_files = get_uploaded_file_names()
-    matches = []
+    file_ls_matches = []
     for ftp_file in ftp_files:
         file_name = filename_to_ls_num(ftp_file)
         if file_name in ls_numbers:
-            matches.append(ftp_file)
-    return matches
+            file_ls_matches.append(ftp_file)
+    return file_ls_matches
 
-def find_all_files_not_uploaded(matches):
+
+def find_all_files_not_uploaded(file_ls_matches):
     """
     For all the file-ls matches, find those that have not been uploaded
     """
-    ls_numbers = tuple([filename_to_ls_num(filename) for filename in matches])
+    ls_numbers = tuple([filename_to_ls_num(filename) for filename in file_ls_matches])
+    ls_id_numbers = get_ls_ids_from_ls_number(ls_numbers)
     SQL = """SELECT docass.docass_source_id from docass where docass.docass_source_id IN %s AND docass.docass_source_type='LS'"""
-    all_existing = set(execute_sql(SQL, ls_numbers))
-    stored_diff = set(ls_numbers) - set(all_existing)
+    all_stored_ids = set([row[0] for row in execute_sql(SQL, tuple([ls[0] for ls in ls_id_numbers]))])
+    numbers_to_store = [ls_entry[1] for ls_entry in ls_id_numbers if ls_entry[0] not in all_stored_ids]
     files_to_store = []
-    for ls_number in stored_diff:
-        filename = filter(lambda ftp_name: filename_to_ls_num(ftp_name) == ls_number, matches)
+
+    for ls_number in numbers_to_store:
+        filename = filter(lambda ftp_name: filename_to_ls_num(ftp_name) == ls_number, file_ls_matches)
         files_to_store += filename
     return files_to_store
+
 
 def load_ftp_file(filename):
     """
     Given a filename, fetch the file from FTP, and return a stream object
     """
-
     with BytesIO() as byte_stream:
         with FTP(host=FTP_HOST, user=FTP_USER, passwd=FTP_PASSWD) as ftp:
             ftp.retrbinary('RETR {}/{}'.format(FTP_DIR, filename), byte_stream.write)
@@ -117,6 +137,7 @@ def insert_missing_file_entries(filenames_to_store):
             cursor.execute(insert_query, files_to_store)
             return cursor.fetchall()
 
+
 def retrieve_docass_values(file_entries):
     """
     Retrieve all the values necessary to generate the docass entry
@@ -136,6 +157,7 @@ def retrieve_docass_values(file_entries):
         docass_entries.append(new_entry)
     return docass_entries
 
+
 def insert_docass_entries(docass_values):
     """
     Do a batch insert into docass, for the new entry values we have collected
@@ -148,12 +170,19 @@ def insert_docass_entries(docass_values):
             cursor.execute(insert_query, docass_values)
             return cursor.fetchall()
 
+
 if __name__ == "__main__":
-    matches = find_ls_ftp_matches()
-    if matches:
-        files_to_store = find_all_files_not_uploaded(matches)
+    print_message('Begin ftp - postgres sync')
+    file_ls_matches = find_ls_ftp_matches()
+    if file_ls_matches:
+        files_to_store = find_all_files_not_uploaded(file_ls_matches)
+        print_message('Files to store: {}'.format(files_to_store))
         if files_to_store:
             file_entries = insert_missing_file_entries(files_to_store)
             docass_values = retrieve_docass_values(file_entries)
             new_ids = insert_docass_entries(docass_values)
-            print('ADDED', new_ids)
+            print_message('Created docass entries: {}'.format(new_ids))
+        else:
+            print_message('All ftp files already stored')
+    else:
+        print_message('No matches between FTP files and ls_numbers')
