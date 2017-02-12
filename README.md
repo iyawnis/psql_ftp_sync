@@ -3,6 +3,7 @@ Script for keeping a Postgres database synced with a FTP server
 
 
 Depedencies:
+
     $ > sudo apt-get install python3
     $ > sudo apt-get install python3-dev
 
