@@ -1,0 +1,6 @@
+database=> select * from docinfo where id=400;
+ id  | target_number | target_type | target_id | source_type | source_id |   name   |  description  | purpose
+-----+---------------+-------------+-----------+-------------+-----------+----------+---------------+---------
+ 400 | 1500001       | LS          |       353 | FILE        |        69 | CS006-01 |               | S
+ 400 | 400           | FILE        |       400 | LS          |       353 | 1500001  | Uploaded file | S
+(2 rows)

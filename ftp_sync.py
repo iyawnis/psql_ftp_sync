@@ -12,7 +12,13 @@ FTP_USER=os.environ['FTP_USER']
 FTP_PASSWD=os.environ['FTP_PASSWD']
 FTP_DIR=os.environ['FTP_DIR']
 
-DocassValues = namedtuple('DocassValues', ['file_id', 'file_title', 'file_descrip', 'item_number', 'ls_id', 'ls_number'])
+DocassValues = namedtuple('DocassValues', [
+    'docass_source_id',
+    'docass_source_type',
+    'docass_target_id',
+    'docass_target_type',
+    'docass_purpose',
+    'docass_created'])
 FileToStore = namedtuple('FileToStore', ['title', 'description', 'stream',])
 
 conn_config = {
@@ -103,7 +109,7 @@ def insert_missing_file_entries(filenames_to_store):
     Given a list of missing filenames, fetch the files and store them in the file table
     """
     files_to_store = [load_ftp_file(filename) for filename in filenames_to_store]
-    sql = """INSERT INTO file(file_title, file_descrip, file_stream) VALUES {} RETURNING file_id, file_title, file_descrip;"""
+    sql = """INSERT INTO file(file_title, file_descrip, file_stream) VALUES {} RETURNING file_id, file_title"""
     with psycopg2.connect(**conn_config) as conn:
         with conn.cursor() as cursor:
             records_list_template = ','.join(['%s'] * len(files_to_store))
@@ -115,21 +121,32 @@ def retrieve_docass_values(file_entries):
     """
     Retrieve all the values necessary to generate the docass entry
     """
-    sql = """SELECT ls.ls_number, ls.ls_id, item.item_number FROM ls JOIN item ON ls.ls_item_id = item.item_id WHERE ls.ls_number IN %s;"""
-    ls_number_to_file_id = {entry[1]: (entry[0], entry[2],) for entry in file_entries}
+    sql = """SELECT ls.ls_number, ls.ls_id, item.item_number FROM ls JOIN item ON ls.ls_item_id = item.item_id WHERE ls.ls_number IN %s"""
+    ls_number_to_file_id = {entry[1]: entry[0] for entry in file_entries}
     item_ls_data = execute_sql(sql, tuple(ls_number_to_file_id.keys()))
     docass_entries = []
     for result in item_ls_data:
-        file_data = ls_number_to_file_id[result[0]]
         new_entry = DocassValues(
-            file_id=file_data[0],
-            file_title=result[0],
-            file_descrip=file_data[1],
-            item_number=result[2],
-            ls_id=result[1],
-            ls_number=result[0])
+            docass_source_id=result[1],
+            docass_source_type='LS',
+            docass_target_id=ls_number_to_file_id[result[0]],
+            docass_target_type='FILE',
+            docass_purpose='S',
+            docass_created='now()')
         docass_entries.append(new_entry)
     return docass_entries
+
+def insert_docass_entries(docass_values):
+    """
+    Do a batch insert into docass, for the new entry values we have collected
+    """
+    sql = """INSERT INTO docass(docass_source_id, docass_source_type, docass_target_id, docass_target_type, docass_purpose, docass_created) values {} RETURNING docass_id"""
+    with psycopg2.connect(**conn_config) as conn:
+        with conn.cursor() as cursor:
+            records_list_template = ','.join(['%s'] * len(docass_values))
+            insert_query = sql.format(records_list_template)
+            cursor.execute(insert_query, docass_values)
+            return cursor.fetchall()
 
 if __name__ == "__main__":
     matches = find_ls_ftp_matches()
@@ -138,3 +155,5 @@ if __name__ == "__main__":
         if files_to_store:
             file_entries = insert_missing_file_entries(files_to_store)
             docass_values = retrieve_docass_values(file_entries)
+            new_ids = insert_docass_entries(docass_values)
+            print('ADDED', new_ids)
