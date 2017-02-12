@@ -2,6 +2,7 @@
 
 import psycopg2
 import os
+from io import BytesIO
 from ftplib import FTP
 from traceback import print_exc
 from collections import namedtuple
@@ -85,11 +86,13 @@ def load_ftp_file(filename):
     """
     Given a filename, fetch the file from FTP, and return a stream object
     """
-    file_obj = None
-    with open(filename, 'rb') as infile:
-        file_obj = infile.read()
-    ls_number = filename_to_ls_num(filename)
-    return FileToStore(title=ls_number, description='Uploaded file', stream=psycopg2.Binary(file_obj))
+
+    with BytesIO() as byte_stream:
+        with FTP(host=FTP_HOST, user=FTP_USER, passwd=FTP_PASSWD) as ftp:
+            ftp.retrbinary('RETR {}'.format(filename), byte_stream.write)
+        ls_number = filename_to_ls_num(filename)
+        byte_stream.seek(0)
+        return FileToStore(title=ls_number, description='Uploaded file', stream=psycopg2.Binary(byte_stream.read()))
 
 
 def insert_missing_file_entries(filenames_to_store):
@@ -97,7 +100,7 @@ def insert_missing_file_entries(filenames_to_store):
     Given a list of missing filenames, fetch the files and store them in the file table
     """
     files_to_store = [load_ftp_file(filename) for filename in filenames_to_store]
-    sql = """INSERT INTO file(file_title, file_descrip, file_stream) VALUES {} RETURNING file_id;"""
+    sql = """INSERT INTO file(file_title, file_descrip, file_stream) VALUES {} RETURNING file_id, file_title;"""
     with psycopg2.connect(**conn_config) as conn:
         with conn.cursor() as cursor:
             records_list_template = ','.join(['%s'] * len(files_to_store))
