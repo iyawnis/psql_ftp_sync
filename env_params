@@ -8,3 +8,4 @@ export DB_PASSWD=xxx
 export FTP_HOST=xxx
 export FTP_USER=xxx
 export FTP_PASSWD=xxx
+export FTP_DIR=.
