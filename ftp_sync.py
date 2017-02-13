@@ -124,18 +124,27 @@ def load_ftp_file(filename):
         return FileToStore(title=ls_number, description='Uploaded file', stream=psycopg2.Binary(byte_stream.read()))
 
 
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+
 def insert_missing_file_entries(filenames_to_store):
     """
     Given a list of missing filenames, fetch the files and store them in the file table
     """
-    files_to_store = [load_ftp_file(filename) for filename in filenames_to_store]
-    sql = """INSERT INTO file(file_title, file_descrip, file_stream) VALUES {} RETURNING file_id, file_title"""
-    with psycopg2.connect(**conn_config) as conn:
-        with conn.cursor() as cursor:
-            records_list_template = ','.join(['%s'] * len(files_to_store))
-            insert_query = sql.format(records_list_template)
-            cursor.execute(insert_query, files_to_store)
-            return cursor.fetchall()
+    file_entries = []
+    for file_batch in chunks(filenames_to_store, 5):
+        files_to_store = [load_ftp_file(filename) for filename in file_batch]
+        sql = """INSERT INTO file(file_title, file_descrip, file_stream) VALUES {} RETURNING file_id, file_title"""
+        with psycopg2.connect(**conn_config) as conn:
+            with conn.cursor() as cursor:
+                records_list_template = ','.join(['%s'] * len(files_to_store))
+                insert_query = sql.format(records_list_template)
+                cursor.execute(insert_query, files_to_store)
+                file_entries.extend(cursor.fetchall())
+    return file_entries
 
 
 def retrieve_docass_values(file_entries):
